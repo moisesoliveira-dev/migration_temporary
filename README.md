@@ -136,6 +136,7 @@ No serviço → **Variables**, adicione (não use o `.env` local):
 
 | Variável | Exemplo |
 |----------|---------|
+| `MIGRATE_ENABLED` | `false` para só deployar / parar · `true` para migrar |
 | `GOSAC_BASE_URL` | `https://cmmodulados.gosac.com.br` |
 | `GOSAC_API_KEY` | sua chave |
 | `COUCHDB_URL` | `https://admin:SENHA@couchdb.servidorcm.cloud` |
@@ -143,6 +144,20 @@ No serviço → **Variables**, adicione (não use o `.env` local):
 | `GOSAC_TIMEOUT_MS` | `120000` (opcional) |
 | `GOSAC_RETRIES` | `3` (opcional) |
 | `GOSAC_RETRY_DELAY_MS` | `2000` (opcional) |
+
+**Controle ligar/parar:**
+
+| Ação | O que fazer |
+|------|-------------|
+| Deploy sem migrar | `MIGRATE_ENABLED=false` e redeploy |
+| Rodar migração | `MIGRATE_ENABLED=true` e redeploy |
+| Parar migração em andamento | `MIGRATE_ENABLED=false` e redeploy (mata o processo atual; o novo sobe e sai na hora) |
+
+**Padrão:** `MIGRATE_ENABLED` é `false` — sem a variável (ou com `false`), o container sobe e encerra sem tocar no CouchDB.
+
+**Já existe no CouchDB?** Sim, é seguro. Antes de gravar cada mensagem o script checa `_id = msg:<id>`:
+- se existir → `ja_no_couch` (não regrava, não duplica);
+- se não existir → grava uma vez.
 
 Se a senha do CouchDB tiver caracteres especiais (`@`, `#`, `:`…), **URL-encode** na `COUCHDB_URL`. Ex.: `@` → `%40`.
 

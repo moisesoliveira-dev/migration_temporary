@@ -1,3 +1,4 @@
+import { config } from '../config.js';
 import { createGosacClient } from '../gosac/client.js';
 import { docExists, getCouchDatabase, messageToDoc, upsertDoc } from '../couchdb/client.js';
 import { createMigrationState } from '../migration/state.js';
@@ -11,6 +12,7 @@ import { createMigrationState } from '../migration/state.js';
  * uma única vez, paginando até hasMore=false.
  *
  * Confirmação de envio: somente o CouchDB (documento msg:<id> existente).
+ * Controle de deploy: MIGRATE_ENABLED=true|false
  *
  * Uso:
  *   node src/scripts/migrate.js
@@ -53,6 +55,13 @@ function sleep(ms) {
 }
 
 async function main() {
+  if (!config.migrateEnabled) {
+    console.log(
+      'MIGRATE_ENABLED=false — migração desligada. Deploy ok; nenhum dado foi alterado no CouchDB.',
+    );
+    process.exit(0);
+  }
+
   const opts = parseArgs(process.argv.slice(2));
   const gosac = createGosacClient();
   const db = await getCouchDatabase();
