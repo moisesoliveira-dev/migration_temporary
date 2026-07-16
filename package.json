@@ -1,0 +1,21 @@
+{
+  "name": "migration-couchdb",
+  "version": "1.0.0",
+  "description": "Migração de mensagens Gosac para CouchDB",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/scripts/migrate.js",
+    "fetch:tickets": "node src/scripts/fetch-tickets.js",
+    "fetch:messages": "node src/scripts/fetch-messages.js",
+    "migrate": "node src/scripts/migrate.js",
+    "migrate:ticket": "node src/scripts/migrate-ticket.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "dotenv": "^16.4.7",
+    "nano": "^10.1.4"
+  }
+}

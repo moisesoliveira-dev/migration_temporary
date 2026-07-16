@@ -1,0 +1,7 @@
+node_modules/
+.env
+.migration-state.json
+.migration-state.json.tmp
+*.log
+data/
+.DS_Store
