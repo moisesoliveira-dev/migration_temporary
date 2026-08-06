@@ -15,12 +15,13 @@ function envFlag(name, defaultValue = false) {
 }
 
 /**
- * MIGRATE_ENABLED:
- * - true / 1 / yes / on  → roda a migração
- * - false / ausente      → sobe e encerra sem migrar (seguro no Railway)
+ * MIGRATE_ENABLED / MEDIA_MIGRATE_ENABLED:
+ * - true / 1 / yes / on  → roda
+ * - false / ausente      → sobe e encerra sem migrar
  */
 export const config = {
   migrateEnabled: envFlag('MIGRATE_ENABLED', false),
+  mediaMigrateEnabled: envFlag('MEDIA_MIGRATE_ENABLED', false),
   gosac: {
     baseUrl: (process.env.GOSAC_BASE_URL || 'https://cmmodulados.gosac.com.br').replace(/\/$/, ''),
     get apiKey() {
@@ -35,5 +36,9 @@ export const config = {
       return required('COUCHDB_URL');
     },
     database: process.env.COUCHDB_DATABASE || 'gosac_messages',
+    /** Database destino dos arquivos (attachments). Ex.: gosac_media */
+    get mediaDatabase() {
+      return required('COUCHDB_MEDIA_DATABASE');
+    },
   },
 };

@@ -3,18 +3,19 @@ import { config } from '../config.js';
 
 /**
  * Conecta ao CouchDB e garante que o database exista.
+ * @param {string} [dbName] nome do database (padrão: COUCHDB_DATABASE)
  */
-export async function getCouchDatabase() {
+export async function getCouchDatabase(dbName = config.couchdb.database) {
   const couch = nano(config.couchdb.url);
-  const dbName = config.couchdb.database;
+  const name = dbName;
 
   const databases = await couch.db.list();
-  if (!databases.includes(dbName)) {
-    await couch.db.create(dbName);
-    console.log(`Database CouchDB criado: ${dbName}`);
+  if (!databases.includes(name)) {
+    await couch.db.create(name);
+    console.log(`Database CouchDB criado: ${name}`);
   }
 
-  return couch.use(dbName);
+  return couch.use(name);
 }
 
 /**
@@ -70,6 +71,8 @@ export function messageToDoc(message, ticket) {
     body: message.body,
     fromMe: message.fromMe,
     mediaType: message.mediaType,
+    mediaUrl: message.mediaUrl,
+    mediaPath: message.mediaPath,
     kind: message.kind,
     messageId: message.messageId,
     contactId: message.contactId,

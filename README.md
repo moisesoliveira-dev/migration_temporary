@@ -57,7 +57,19 @@ npm run migrate -- --reset
 
 # testar com poucos contatos
 npm run migrate -- --max-contacts 3
+
+# migrar arquivos (mediaUrl/mediaPath) para COUCHDB_MEDIA_DATABASE
+npm run migrate:media
+npm run migrate:media -- --max 10
 ```
+
+## Migração de mídia
+
+Lê mensagens em `COUCHDB_DATABASE` que tenham `mediaUrl` ou `mediaPath`, baixa o arquivo e grava em `COUCHDB_MEDIA_DATABASE` como documento + **attachment**.
+
+- `_id`: `media:<uuid-da-mensagem>`
+- se o doc já existe com attachment → `ja_no_couch` (não rebaixa)
+- controle: `MEDIA_MIGRATE_ENABLED=true|false`
 
 Opções de `migrate`:
 
@@ -136,11 +148,13 @@ No serviço → **Variables**, adicione (não use o `.env` local):
 
 | Variável | Exemplo |
 |----------|---------|
-| `MIGRATE_ENABLED` | `false` para só deployar / parar · `true` para migrar |
+| `MIGRATE_ENABLED` | `false` para só deployar / parar · `true` para migrar mensagens |
+| `MEDIA_MIGRATE_ENABLED` | `false` / `true` para migrar arquivos de mídia |
 | `GOSAC_BASE_URL` | `https://cmmodulados.gosac.com.br` |
 | `GOSAC_API_KEY` | sua chave |
 | `COUCHDB_URL` | `https://admin:SENHA@couchdb.servidorcm.cloud` |
 | `COUCHDB_DATABASE` | `gosac_geral` |
+| `COUCHDB_MEDIA_DATABASE` | `gosac_media` (arquivos/attachments) |
 | `GOSAC_TIMEOUT_MS` | `120000` (opcional) |
 | `GOSAC_RETRIES` | `3` (opcional) |
 | `GOSAC_RETRY_DELAY_MS` | `2000` (opcional) |
