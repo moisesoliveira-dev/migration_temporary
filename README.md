@@ -179,9 +179,20 @@ Se a senha do CouchDB tiver caracteres especiais (`@`, `#`, `:`…), **URL-encod
 
 Em **Settings → Deploy**:
 
-- Start Command: `node src/scripts/migrate.js` (já vem do `railway.json`)
+- Start Command: `node src/scripts/start.js` (já vem do `railway.json`)
 - Restart Policy: **Never**
 - **Não** gere domínio público — não é uma API web
+
+O `start.js` decide o que rodar pelas flags:
+
+| Flags | O que acontece no Deploy Log |
+|-------|------------------------------|
+| ambas `false` | “Nenhuma migração ligada…” e encerra |
+| `MIGRATE_ENABLED=true` | migra mensagens |
+| `MEDIA_MIGRATE_ENABLED=true` | analisa **todas** as mídias; baixa as que existem; 404 = excluído (continua) |
+| ambas `true` | roda mensagens e depois mídia |
+
+Na migração de mídia os logs mostram cada arquivo (`OK`, `ja_no_couch`, `404 (excluído no Gosac)` + URL) e um **resumo final**. Também grava um relatório em `gosac_media` com `_id` `report:media-migrate:<timestamp>`.
 
 ### 4. Rodar / acompanhar
 

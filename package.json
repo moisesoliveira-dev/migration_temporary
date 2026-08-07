@@ -7,7 +7,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "start": "node src/scripts/migrate.js",
+    "start": "node src/scripts/start.js",
     "fetch:tickets": "node src/scripts/fetch-tickets.js",
     "fetch:messages": "node src/scripts/fetch-messages.js",
     "migrate": "node src/scripts/migrate.js",

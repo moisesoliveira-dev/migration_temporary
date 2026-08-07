@@ -7,6 +7,9 @@ import { docExists, getCouchDatabase } from '../couchdb/client.js';
  * Baixa arquivos de mediaUrl/mediaPath das mensagens em COUCHDB_DATABASE
  * e grava no COUCHDB_MEDIA_DATABASE como documento + attachment.
  *
+ * Percorre TODAS as mensagens com mídia. 404 = arquivo excluído no Gosac
+ * (conta como falha, continua). Já existente no CouchDB = pula.
+ *
  * Controle: MEDIA_MIGRATE_ENABLED=true|false
  *
  * Uso:
@@ -30,7 +33,6 @@ function sleep(ms) {
 function pickMediaUrl(doc) {
   const url = doc.mediaUrl || doc.raw?.mediaUrl || null;
   const mediaPath = doc.mediaPath || doc.raw?.mediaPath || null;
-  // preferir URL http(s); se mediaPath também for URL, usa como fallback
   if (url && /^https?:\/\//i.test(url)) return { source: 'mediaUrl', url };
   if (mediaPath && /^https?:\/\//i.test(mediaPath)) return { source: 'mediaPath', url: mediaPath };
   if (url) return { source: 'mediaUrl', url };
@@ -61,43 +63,32 @@ function filenameFromUrl(url, contentType) {
 }
 
 function mediaDocId(messageDocId) {
-  // msg:uuid → media:uuid
   const id = String(messageDocId).replace(/^msg:/, '');
   return `media:${id}`;
 }
 
-async function downloadFile(url) {
+async function tryDownload(url, headers = {}) {
   const response = await axios.get(url, {
     responseType: 'arraybuffer',
     timeout: config.gosac.timeoutMs,
-    headers: {
-      // algumas rotas públicas do Gosac aceitam sem auth; se falhar, retry com key
-      Accept: '*/*',
-    },
+    headers: { Accept: '*/*', ...headers },
     validateStatus: (status) => status >= 200 && status < 400,
   });
-
   const contentType = response.headers['content-type']?.split(';')[0]?.trim() || 'application/octet-stream';
-  const buffer = Buffer.from(response.data);
-  return { buffer, contentType };
+  return { buffer: Buffer.from(response.data), contentType };
 }
 
+/** Tenta com auth primeiro; se 401/403, tenta sem. 404 propaga. */
 async function downloadFileWithFallback(url) {
   try {
-    return await downloadFile(url);
-  } catch (error) {
-    if (![401, 403].includes(error.response?.status)) throw error;
-    const response = await axios.get(url, {
-      responseType: 'arraybuffer',
-      timeout: config.gosac.timeoutMs,
-      headers: {
-        Authorization: `INTEGRATION ${config.gosac.apiKey}`,
-        Accept: '*/*',
-      },
-      validateStatus: (status) => status >= 200 && status < 400,
+    return await tryDownload(url, {
+      Authorization: `INTEGRATION ${config.gosac.apiKey}`,
     });
-    const contentType = response.headers['content-type']?.split(';')[0]?.trim() || 'application/octet-stream';
-    return { buffer: Buffer.from(response.data), contentType };
+  } catch (error) {
+    const status = error.response?.status;
+    if (status === 404) throw error;
+    if (![401, 403].includes(status) && status !== undefined) throw error;
+    return tryDownload(url);
   }
 }
 
@@ -150,7 +141,6 @@ async function saveMediaDoc(mediaDb, messageDoc, media, file, filename) {
   let rev;
   try {
     const existing = await mediaDb.get(_id);
-    // se já tem o attachment com mesmo nome e tamanho, não rebaixa
     const att = existing._attachments?.[filename];
     if (att && att.length === file.buffer.length) {
       return { status: 'skipped', _id };
@@ -173,6 +163,20 @@ async function saveMediaDoc(mediaDb, messageDoc, media, file, filename) {
   return { status: 'ok', _id };
 }
 
+async function saveReport(mediaDb, report) {
+  const doc = {
+    _id: `report:media-migrate:${report.startedAt}`,
+    type: 'media_migrate_report',
+    ...report,
+  };
+  try {
+    await mediaDb.insert(doc);
+    console.log(`Relatório salvo em ${config.couchdb.mediaDatabase}/${doc._id}`);
+  } catch (error) {
+    console.warn(`Não foi possível salvar relatório no CouchDB: ${error.message}`);
+  }
+}
+
 async function main() {
   if (!config.mediaMigrateEnabled) {
     console.log(
@@ -185,15 +189,20 @@ async function main() {
   const sourceDb = await getCouchDatabase(config.couchdb.database);
   const mediaDb = await getCouchDatabase(config.couchdb.mediaDatabase);
 
+  const startedAt = new Date().toISOString();
   console.log(
-    `Migração de mídia | origem=${config.couchdb.database} → destino=${config.couchdb.mediaDatabase} | delay=${opts.delayMs}ms`,
+    `Migração de mídia | origem=${config.couchdb.database} → destino=${config.couchdb.mediaDatabase} | delay=${opts.delayMs}ms | max=${opts.max === Infinity ? 'todos' : opts.max}`,
   );
+  console.log('Vai analisar TODAS as mensagens com mídia. 404 = arquivo excluído no Gosac (continua).');
 
   let scanned = 0;
   let withMedia = 0;
+  let attempted = 0;
   let ok = 0;
   let skipped = 0;
-  let fail = 0;
+  let fail404 = 0;
+  let failOther = 0;
+  const failures = [];
 
   for await (const doc of iterateMessageDocs(sourceDb)) {
     scanned += 1;
@@ -201,10 +210,11 @@ async function main() {
     if (!media) continue;
 
     withMedia += 1;
-    if (ok + skipped + fail >= opts.max) break;
+    if (attempted >= opts.max) continue;
 
+    attempted += 1;
     const _id = mediaDocId(doc._id);
-    process.stdout.write(`[${withMedia}] ${doc._id}... `);
+    process.stdout.write(`[${attempted}/${opts.max === Infinity ? '?' : opts.max}] ${doc._id}... `);
 
     try {
       if (await docExists(mediaDb, _id)) {
@@ -226,19 +236,59 @@ async function main() {
         console.log(`ja_no_couch (${filename})`);
       } else {
         ok += 1;
-        console.log(`ok ${filename} ${file.buffer.length}b`);
+        console.log(`OK ${filename} ${file.buffer.length}b`);
       }
     } catch (error) {
-      fail += 1;
-      console.log(`ERRO: ${error.response?.status || ''} ${error.message}`);
+      const status = error.response?.status;
+      if (status === 404) {
+        fail404 += 1;
+        console.log(`404 (excluído no Gosac) ${media.url}`);
+      } else {
+        failOther += 1;
+        console.log(`ERRO ${status || ''} ${error.message} | ${media.url}`);
+      }
+      failures.push({
+        messageId: doc._id,
+        mediaId: _id,
+        url: media.url,
+        status: status || null,
+        error: error.message,
+      });
     }
 
     if (opts.delayMs > 0) await sleep(opts.delayMs);
+
+    // progresso periódico nos logs do Railway
+    if (attempted % 25 === 0) {
+      console.log(
+        `--- progresso: tentados=${attempted} ok=${ok} ja_no_couch=${skipped} 404=${fail404} outros_erros=${failOther} ---`,
+      );
+    }
   }
 
-  console.log(
-    `\nFinalizado. scanned=${scanned} com_midia=${withMedia} novas=${ok} ja_no_couch=${skipped} falhas=${fail}`,
-  );
+  const finishedAt = new Date().toISOString();
+  console.log('\n========== RESUMO MÍDIA ==========');
+  console.log(`scanned_msgs=${scanned}`);
+  console.log(`com_midia=${withMedia}`);
+  console.log(`tentados=${attempted}`);
+  console.log(`novas_ok=${ok}`);
+  console.log(`ja_no_couch=${skipped}`);
+  console.log(`falhas_404_excluidos=${fail404}`);
+  console.log(`falhas_outras=${failOther}`);
+  console.log('==================================');
+
+  await saveReport(mediaDb, {
+    startedAt,
+    finishedAt,
+    scanned,
+    withMedia,
+    attempted,
+    ok,
+    skipped,
+    fail404,
+    failOther,
+    failures: failures.slice(0, 500),
+  });
 }
 
 main().catch((error) => {

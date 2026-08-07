@@ -4,7 +4,7 @@
     "builder": "NIXPACKS"
   },
   "deploy": {
-    "startCommand": "node src/scripts/migrate.js",
+    "startCommand": "node src/scripts/start.js",
     "restartPolicyType": "NEVER"
   }
 }
