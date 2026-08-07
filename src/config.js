@@ -40,5 +40,7 @@ export const config = {
     get mediaDatabase() {
       return required('COUCHDB_MEDIA_DATABASE');
     },
+    retries: Number(process.env.COUCHDB_RETRIES || 5),
+    retryDelayMs: Number(process.env.COUCHDB_RETRY_DELAY_MS || 5_000),
   },
 };
