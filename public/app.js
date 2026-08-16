@@ -123,8 +123,10 @@ async function refreshStatus() {
       sample?.newestCreatedAt,
     );
     document.getElementById("statMigrated").textContent = fmtDate(
-      sample?.newestMigratedAt,
+      sample?.watermark || sample?.newestMigratedAt,
     );
+    const src = document.getElementById("statSampleSource");
+    if (src) src.textContent = sample?.source || "amostra";
     document.getElementById("statLag").textContent =
       lag == null ? "sem amostra" : lag <= 1 ? "em dia" : `${lag} dias atrás`;
 

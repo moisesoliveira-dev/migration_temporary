@@ -238,9 +238,11 @@ export async function runFullMessageMigration(opts = {}, onProgress = () => {}, 
 }
 
 /**
- * Catch-up a partir da última mensagem no CouchDB (watermark).
- * Por padrão (verificação diária) só processa tickets atualizados no dia
- * (updatedAt / lastMessage), no fuso configurado — sem teto de páginas.
+ * Verificação diária / catch-up:
+ * - Só tickets atualizados no dia (updatedAt / lastMessage), se onlyUpdatedToday.
+ * - Em cada um desses tickets: grava TODAS as msgs que ainda não estão no CouchDB
+ *   (inclusive de dias anteriores — buracos/gaps), sem teto de páginas.
+ * - Para de paginar o ticket quando achar sequência já existente no Couch.
  */
 export async function runCatchUpSync(opts = {}, onProgress = () => {}, shouldStop = () => false) {
   const {
@@ -248,20 +250,18 @@ export async function runCatchUpSync(opts = {}, onProgress = () => {}, shouldSto
     messageDelayMs = 5,
     database,
     status,
-    /** tickets seguidos sem msg nova → encerra a varredura */
+    /** tickets atualizados no dia seguidos sem msg nova → encerra */
     idleTicketsToStop = 40,
-    /** só tickets com updatedAt no dia civil atual */
     onlyUpdatedToday = true,
     timezoneOffsetHours = -3,
+    /** sequência de msgs já no Couch → fim das páginas daquele ticket */
+    existingStreakToStop = 20,
   } = opts;
 
   const dbName = database || (await getMessageDatabaseName());
   const gosac = createGosacClient();
   const db = await getCouchDatabase(dbName);
   const watermarkInfo = await resolveSyncWatermark(dbName);
-  const watermarkTs = watermarkInfo.newestCreatedAt
-    ? new Date(watermarkInfo.newestCreatedAt).getTime()
-    : 0;
   const dayStartTs = onlyUpdatedToday
     ? startOfDayTimestamp(timezoneOffsetHours)
     : null;
@@ -278,15 +278,14 @@ export async function runCatchUpSync(opts = {}, onProgress = () => {}, shouldSto
   onProgress({
     type: 'log',
     level: 'info',
-    message: watermarkInfo.newestCreatedAt
-      ? `Watermark: ${watermarkInfo.newestCreatedAt} (fonte=${watermarkInfo.source}). Buscando msgs posteriores.`
-      : 'Sem watermark — catch-up até encontrar msgs já no CouchDB (sem teto de páginas).',
+    message:
+      'Regra: ticket atualizado no dia → todas as msgs faltantes no CouchDB (mesmo de dias anteriores).',
   });
   if (dayStartTs != null) {
     onProgress({
       type: 'log',
       level: 'info',
-      message: `Filtro: só tickets atualizados desde ${new Date(dayStartTs).toISOString()} (UTC${timezoneOffsetHours >= 0 ? '+' : ''}${timezoneOffsetHours}).`,
+      message: `Filtro de tickets: updatedAt/lastMessage desde ${new Date(dayStartTs).toISOString()} (UTC${timezoneOffsetHours >= 0 ? '+' : ''}${timezoneOffsetHours}).`,
     });
   }
 
@@ -317,10 +316,10 @@ export async function runCatchUpSync(opts = {}, onProgress = () => {}, shouldSto
 
       if (dayStartTs != null) {
         const updatedTs = ticketUpdatedTimestamp(ticket);
-        if (!updatedTs || updatedTs < dayStartTs) {
+        // Sem campo de data no ticket: não descarta — processa (melhor pegar a mais do que perder)
+        if (updatedTs && updatedTs < dayStartTs) {
           ticketsSkippedOld += 1;
           consecutiveOldTickets += 1;
-          // lista em order=desc: muitos tickets velhos seguidos → fim do dia
           if (consecutiveOldTickets >= 25) {
             hasMore = false;
             break;
@@ -343,16 +342,13 @@ export async function runCatchUpSync(opts = {}, onProgress = () => {}, shouldSto
 
       let pageNumber = 1;
       let newOnTicket = 0;
-      let knownTicket = false;
       let hitExistingStreak = 0;
-      let reachedOldTerritory = false;
+      let reachedKnownHistory = false;
 
-      while (!reachedOldTerritory) {
+      while (!reachedKnownHistory) {
         if (shouldStop()) break;
         const { messages, raw } = await gosac.getMessages(ticket.id, { pageNumber });
         if (!messages.length) break;
-
-        let newerOrEqualOnPage = 0;
 
         for (const message of messages) {
           if (shouldStop()) break;
@@ -362,24 +358,8 @@ export async function runCatchUpSync(opts = {}, onProgress = () => {}, shouldSto
             String(message.ticketId) === String(ticket.id) ? ticket : undefined,
           );
 
-          // Já no/antes do watermark → território conhecido (não é o alvo do catch-up)
-          if (watermarkTs && ts <= watermarkTs) {
-            try {
-              if (await docExists(db, doc._id)) {
-                knownTicket = true;
-                totalSkipped += 1;
-                hitExistingStreak += 1;
-              }
-            } catch {
-              // ignore head errors no território antigo
-            }
-            continue;
-          }
-
-          newerOrEqualOnPage += 1;
           try {
             if (await docExists(db, doc._id)) {
-              knownTicket = true;
               totalSkipped += 1;
               hitExistingStreak += 1;
             } else {
@@ -403,26 +383,15 @@ export async function runCatchUpSync(opts = {}, onProgress = () => {}, shouldSto
           if (messageDelayMs > 0) await sleep(messageDelayMs);
         }
 
-        // Página inteira já está no/antes do watermark → ticket alcançou o conhecido
-        const allOnOrBeforeWatermark =
-          watermarkTs > 0 && messages.every((m) => messageTime(m) <= watermarkTs);
-
-        if (allOnOrBeforeWatermark) {
-          reachedOldTerritory = true;
-        } else if (!watermarkTs && hitExistingStreak >= 15) {
-          // sem watermark: ticket conhecido — para ao achar sequência já no Couch
-          knownTicket = true;
-          reachedOldTerritory = true;
+        // API em ordem desc: sequência já no Couch = chegou no histórico conhecido
+        if (hitExistingStreak >= existingStreakToStop) {
+          reachedKnownHistory = true;
         } else if (!raw?.hasMore) {
-          reachedOldTerritory = true;
+          reachedKnownHistory = true;
         } else {
           pageNumber += 1;
           if (pageDelayMs > 0) await sleep(pageDelayMs);
         }
-
-        // ticket conhecido: continua páginas sem teto até old territory (já acima)
-        void knownTicket;
-        void newerOrEqualOnPage;
       }
 
       if (newOnTicket === 0) consecutiveIdle += 1;
@@ -431,7 +400,7 @@ export async function runCatchUpSync(opts = {}, onProgress = () => {}, shouldSto
       onProgress({
         type: 'log',
         level: 'info',
-        message: `Ticket #${ticket.id}: novas=${newOnTicket} idle_seq=${consecutiveIdle}/${idleTicketsToStop}`,
+        message: `Ticket #${ticket.id}: novas=${newOnTicket} ja_no_couch_seq=${hitExistingStreak} idle_seq=${consecutiveIdle}/${idleTicketsToStop}`,
       });
     }
 

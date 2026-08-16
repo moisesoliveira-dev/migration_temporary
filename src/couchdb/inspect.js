@@ -1,6 +1,7 @@
-import nano from "nano";
-import { config } from "../config.js";
-import { getCouchDatabase } from "./client.js";
+import nano from 'nano';
+import { config } from '../config.js';
+import { getCouchDatabase } from './client.js';
+import { readSyncWatermark } from './watermark.js';
 
 /**
  * Lista databases e info básica (sem senha na URL).
@@ -8,7 +9,7 @@ import { getCouchDatabase } from "./client.js";
 export async function listCouchDatabases() {
   const client = nano(config.couchdb.url);
   const databases = await client.db.list();
-  return databases.filter((name) => !name.startsWith("_"));
+  return databases.filter((name) => !name.startsWith('_'));
 }
 
 export async function getDatabaseInfo(dbName) {
@@ -24,53 +25,93 @@ export async function getDatabaseInfo(dbName) {
   };
 }
 
-/**
- * Amostra as mensagens mais recentes por createdAt (scan limitado).
- * Sem view dedicada — bom o suficiente para diagnóstico no painel.
- */
-export async function sampleLatestMessages(
-  dbName,
-  { limit = 20, scan = 500 } = {},
-) {
-  const db = await getCouchDatabase(dbName);
-  const page = await db.list({
-    include_docs: true,
-    limit: scan,
-    descending: true,
-  });
-  const messages = [];
-
-  for (const row of page.rows) {
-    const doc = row.doc;
-    if (!doc || doc.type !== "message") continue;
-    messages.push({
-      _id: doc._id,
-      createdAt: doc.createdAt,
-      migratedAt: doc.migratedAt,
-      ticketId: doc.ticketId,
-      contactId: doc.contactId,
-      contactName: doc.contact?.name || doc.ticket?.contactName,
-      bodyPreview: String(doc.body || "").slice(0, 120),
-      mediaType: doc.mediaType,
+async function ensureMessageCreatedAtIndex(db) {
+  try {
+    await db.createIndex({
+      index: { fields: ['type', 'createdAt'] },
+      name: 'idx-message-createdAt',
+      ddoc: 'idx-message-createdAt',
     });
+  } catch {
+    // já existe ou indisponível
+  }
+}
+
+function mapMessageRow(doc) {
+  return {
+    _id: doc._id,
+    createdAt: doc.createdAt,
+    migratedAt: doc.migratedAt,
+    ticketId: doc.ticketId,
+    contactId: doc.contactId,
+    contactName: doc.contact?.name || doc.ticket?.contactName,
+    bodyPreview: String(doc.body || '').slice(0, 120),
+    mediaType: doc.mediaType,
+  };
+}
+
+/**
+ * Mensagens mais recentes por createdAt (Mango) + watermark para o Overview.
+ */
+export async function sampleLatestMessages(dbName, { limit = 20, scan = 2500 } = {}) {
+  const db = await getCouchDatabase(dbName, { quiet: true });
+  const watermark = await readSyncWatermark(dbName).catch(() => null);
+
+  let latest = [];
+  let source = 'scan';
+
+  try {
+    await ensureMessageCreatedAtIndex(db);
+    const found = await db.find({
+      selector: {
+        type: 'message',
+        createdAt: { $gt: null },
+      },
+      sort: [{ type: 'asc' }, { createdAt: 'desc' }],
+      limit,
+    });
+    latest = (found.docs || []).map(mapMessageRow);
+    if (latest.length) source = 'mango';
+  } catch {
+    // fallback
   }
 
-  messages.sort(
+  if (!latest.length) {
+    const page = await db.list({
+      include_docs: true,
+      limit: scan,
+      descending: true,
+    });
+    const messages = [];
+    for (const row of page.rows) {
+      const doc = row.doc;
+      if (!doc || doc.type !== 'message') continue;
+      messages.push(mapMessageRow(doc));
+    }
+    messages.sort(
+      (a, b) =>
+        new Date(b.migratedAt || b.createdAt || 0) -
+        new Date(a.migratedAt || a.createdAt || 0),
+    );
+    latest = messages.slice(0, limit);
+    source = 'scan-migratedAt';
+  }
+
+  const byCreated = [...latest].sort(
     (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0),
   );
-  const latest = messages.slice(0, limit);
-  const newestCreatedAt = latest[0]?.createdAt || null;
-  const newestMigratedAt =
-    [...messages].sort(
-      (a, b) => new Date(b.migratedAt || 0) - new Date(a.migratedAt || 0),
-    )[0]?.migratedAt || null;
+  const byMigrated = [...latest].sort(
+    (a, b) => new Date(b.migratedAt || 0) - new Date(a.migratedAt || 0),
+  );
 
   return {
-    scanned: page.rows.length,
-    messageSamples: messages.length,
-    newestCreatedAt,
-    newestMigratedAt,
-    latest,
+    scanned: latest.length,
+    messageSamples: latest.length,
+    newestCreatedAt: watermark?.newestCreatedAt || byCreated[0]?.createdAt || null,
+    newestMigratedAt: byMigrated[0]?.migratedAt || watermark?.updatedAt || null,
+    watermark: watermark?.newestCreatedAt || null,
+    source,
+    latest: byCreated.slice(0, limit),
   };
 }
 
@@ -98,10 +139,10 @@ export async function compareMessageDatabases(a, b) {
 export function maskCouchUrl(url) {
   try {
     const u = new URL(url);
-    if (u.password) u.password = "***";
-    if (u.username) u.username = u.username ? "***" : "";
+    if (u.password) u.password = '***';
+    if (u.username) u.username = u.username ? '***' : '';
     return u.toString();
   } catch {
-    return "(url inválida)";
+    return '(url inválida)';
   }
 }

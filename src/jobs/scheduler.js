@@ -106,7 +106,7 @@ export function createScheduler(jobManager) {
       if (!jobManager.getActive()) {
         try {
           await jobManager.runDailyCheck({
-            includeMedia: s.dailyCheck.includeMedia,
+            includeMedia: s.dailyCheck.includeMedia !== false,
             timezoneOffsetHours: s.dailyCheck.timezoneOffsetHours ?? -3,
             onlyUpdatedToday: true,
           });

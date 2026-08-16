@@ -193,7 +193,7 @@ export function createJobManager() {
             type: 'log',
             level: 'info',
             message:
-              'Verificação diária: tickets atualizados no dia + catch-up desde o watermark (sem teto de páginas). Mídia só das msgs novas.',
+              'Verificação diária: tickets atualizados no dia → todas msgs faltantes (mesmo de dias anteriores) → mídia faltante desde 00:00.',
           });
 
           const sync = await runCatchUpSync(
@@ -208,11 +208,21 @@ export function createJobManager() {
           );
 
           let media = null;
-          if (jobOpts.includeMedia && !shouldStop()) {
+          // padrão: mídia SEMPRE entra na diária (só desliga se includeMedia === false)
+          const runMedia = jobOpts.includeMedia !== false;
+          if (runMedia && !shouldStop()) {
+            const mediaSince = sync.dayStart || null;
+            onProgress({
+              type: 'log',
+              level: 'info',
+              message: mediaSince
+                ? `Mídia: anexos faltantes de msgs desde ${mediaSince} → banco de mídia`
+                : 'Mídia: varrendo anexos pendentes (sem filtro de data).',
+            });
             media = await runMediaMigration(
               {
                 max: Infinity,
-                onlyAfterCreatedAt: sync.watermarkBefore || null,
+                onlyAfterCreatedAt: mediaSince,
                 sourceDatabase: jobOpts.database,
                 mediaDatabase: jobOpts.mediaDatabase,
               },

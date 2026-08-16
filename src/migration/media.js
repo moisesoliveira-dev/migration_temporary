@@ -205,7 +205,8 @@ export async function runMediaMigration(opts = {}, onProgress = () => {}, should
 
     if (afterTs != null) {
       const ts = new Date(doc.createdAt || 0).getTime();
-      if (Number.isNaN(ts) || ts <= afterTs) continue;
+      // inclusive: desde o início do dia (00:00)
+      if (Number.isNaN(ts) || ts < afterTs) continue;
     }
 
     const media = pickMediaUrl(doc);

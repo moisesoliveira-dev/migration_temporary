@@ -76,9 +76,9 @@
               <em id="statLag">atraso</em>
             </article>
             <article class="metric">
-              <span>Última migração</span>
+              <span>Última sync (watermark)</span>
               <strong id="statMigrated">—</strong>
-              <em>migratedAt</em>
+              <em id="statSampleSource">amostra</em>
             </article>
           </div>
 
@@ -200,9 +200,10 @@
             <div class="block-head">
               <h2>Verificação diária</h2>
               <p>
-                À hora marcada, pega tickets <strong>atualizados no dia</strong>
-                (updatedAt / lastMessage) e faz catch-up desde o watermark —
-                sem teto de páginas. Mídia: anexos das msgs novas do período.
+                À hora marcada: tickets <strong>atualizados no dia</strong> →
+                <strong>todas</strong> as msgs faltantes no banco de mensagens
+                (mesmo de dias anteriores) → anexos faltantes no banco de mídia
+                (desde 00:00).
               </p>
             </div>
             <div class="form-grid">
@@ -212,7 +213,7 @@
               </label>
               <label class="switch">
                 <input type="checkbox" id="cfgDailyMedia" checked />
-                <span>Incluir mídia das msgs novas</span>
+                <span>Incluir mídia/documentos (recomendado)</span>
               </label>
               <label class="time-field">
                 Horário diário
