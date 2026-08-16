@@ -31,9 +31,49 @@ cp .env.example .env
 npm install
 ```
 
+## Painel de controle (recomendado)
+
+Interface web para diagnosticar o banco, trocar `gosac_geral` ↔ `gosac_messages`,
+disparar jobs e manter **sync contínuo** + **verificação diária** (mensagens e mídia).
+
+```bash
+npm run panel
+# abre http://localhost:3847
+```
+
+No painel você consegue:
+
+| Área | O que faz |
+|------|-----------|
+| Diagnóstico | docs no CouchDB, msg mais recente, atraso em dias |
+| Comparar DBs | `gosac_geral` × `gosac_messages` |
+| Database ativo | sobrescreve `COUCHDB_DATABASE` sem redeploy (`.control-settings.json`) |
+| Sync contínuo | a cada N minutos puxa tickets recentes e grava msgs novas |
+| Verificação diária | agenda horária (msgs + mídia opcional) |
+| Jobs manuais | incremental, full, ticket pontual, mídia, stop, reset checkpoint |
+
+Variáveis extras:
+
+| Variável | Uso |
+|----------|-----|
+| `CONTROL_PANEL=true` | `npm start` sobe o painel (processo persistente) |
+| `PORT` | porta HTTP (padrão `3847`) |
+| `ADMIN_TOKEN` | protege a API (Bearer / `x-admin-token` / `?token=`) |
+| `CONTROL_SETTINGS_FILE` | path do JSON de settings (padrão `.control-settings.json`) |
+
+> **Importante:** o destino correto das mensagens é `gosac_messages`. Se o `.env`
+> estiver em `gosac_geral`, corrija no painel (campo database) **ou** no `.env`.
+
+No Railway, para o painel ficar no ar: `CONTROL_PANEL=true`, Restart Policy
+**On Failure** (ou Always), publique o domínio interno/público e defina `ADMIN_TOKEN`.
+Anexe um Volume se quiser persistir `.control-settings.json` e `.migration-state.json`.
+
 ## Scripts
 
 ```bash
+# painel web (controle total)
+npm run panel
+
 # listar tickets (1ª página)
 npm run fetch:tickets
 
@@ -148,12 +188,14 @@ No serviço → **Variables**, adicione (não use o `.env` local):
 
 | Variável | Exemplo |
 |----------|---------|
-| `MIGRATE_ENABLED` | `false` para só deployar / parar · `true` para migrar mensagens |
-| `MEDIA_MIGRATE_ENABLED` | `false` / `true` para migrar arquivos de mídia |
+| `CONTROL_PANEL` | `true` sobe o painel web (preferível) · `false` = one-shot antigo |
+| `ADMIN_TOKEN` | token do painel (obrigatório se o domínio for público) |
+| `MIGRATE_ENABLED` | one-shot: `false` para só deployar / parar · `true` para migrar mensagens |
+| `MEDIA_MIGRATE_ENABLED` | one-shot: `false` / `true` para migrar arquivos de mídia |
 | `GOSAC_BASE_URL` | `https://cmmodulados.gosac.com.br` |
 | `GOSAC_API_KEY` | sua chave |
 | `COUCHDB_URL` | `https://admin:SENHA@couchdb.servidorcm.cloud` |
-| `COUCHDB_DATABASE` | `gosac_geral` |
+| `COUCHDB_DATABASE` | `gosac_messages` (não use `gosac_geral` como destino das msgs) |
 | `COUCHDB_MEDIA_DATABASE` | `gosac_media` (arquivos/attachments) |
 | `GOSAC_TIMEOUT_MS` | `120000` (opcional) |
 | `GOSAC_RETRIES` | `3` (opcional) |
@@ -180,15 +222,17 @@ Se a senha do CouchDB tiver caracteres especiais (`@`, `#`, `:`…), **URL-encod
 Em **Settings → Deploy**:
 
 - Start Command: `node src/scripts/start.js` (já vem do `railway.json`)
-- Restart Policy: **Never**
-- **Não** gere domínio público — não é uma API web
+- Restart Policy: **On Failure** (ou Always se `CONTROL_PANEL=true`)
+- Com painel: publique domínio e use `ADMIN_TOKEN`
+- Sem painel (one-shot): domínio público não é necessário
 
 O `start.js` decide o que rodar pelas flags:
 
-| Flags | O que acontece no Deploy Log |
-|-------|------------------------------|
-| ambas `false` | “Nenhuma migração ligada…” e encerra |
-| `MIGRATE_ENABLED=true` | migra mensagens |
+| Flags | O que acontece |
+|-------|----------------|
+| `CONTROL_PANEL=true` | sobe painel web (sync contínuo/diário + jobs) |
+| ambas migrate `false` | “Nenhuma migração ligada…” e encerra |
+| `MIGRATE_ENABLED=true` | migra mensagens (one-shot) |
 | `MEDIA_MIGRATE_ENABLED=true` | analisa **todas** as mídias; baixa as que existem; 404 = excluído (continua) |
 | ambas `true` | roda mensagens e depois mídia |
 

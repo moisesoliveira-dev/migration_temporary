@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Gosac Sync · Controle</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <div>
+            <strong>Gosac Sync</strong>
+            <small>CouchDB control</small>
+          </div>
+        </div>
+
+        <nav class="nav" id="nav">
+          <button type="button" class="nav-item active" data-view="overview">Overview</button>
+          <button type="button" class="nav-item" data-view="sync">Sync & agenda</button>
+          <button type="button" class="nav-item" data-view="jobs">Jobs</button>
+          <button type="button" class="nav-item" data-view="databases">Databases</button>
+          <button type="button" class="nav-item" data-view="settings">Settings</button>
+        </nav>
+
+        <div class="sidebar-foot">
+          <div class="live-pill" id="livePill">
+            <span class="dot"></span>
+            <span id="liveLabel">conectando…</span>
+          </div>
+          <label class="token-wrap">
+            Admin token
+            <input id="adminToken" type="password" placeholder="opcional" autocomplete="off" />
+          </label>
+        </div>
+      </aside>
+
+      <div class="main">
+        <header class="topbar">
+          <div>
+            <p class="kicker" id="viewKicker">Status ao vivo</p>
+            <h1 id="viewTitle">Overview</h1>
+          </div>
+          <div class="topbar-actions">
+            <button type="button" class="btn ghost" id="btnRefresh">Atualizar</button>
+            <button type="button" class="btn primary" id="btnQuickSync">Sync agora</button>
+          </div>
+        </header>
+
+        <!-- OVERVIEW -->
+        <section class="view active" id="view-overview">
+          <div class="alert" id="lagAlert" hidden></div>
+
+          <div class="metric-row">
+            <article class="metric">
+              <span>Database ativo</span>
+              <strong id="statDb">—</strong>
+              <em id="statDbEnv">.env</em>
+            </article>
+            <article class="metric">
+              <span>Documentos</span>
+              <strong id="statDocs">—</strong>
+              <em>CouchDB</em>
+            </article>
+            <article class="metric">
+              <span>Última msg (createdAt)</span>
+              <strong id="statNewest">—</strong>
+              <em id="statLag">atraso</em>
+            </article>
+            <article class="metric">
+              <span>Última migração</span>
+              <strong id="statMigrated">—</strong>
+              <em>migratedAt</em>
+            </article>
+          </div>
+
+          <div class="split">
+            <div class="block">
+              <div class="block-head">
+                <h2>Ações rápidas</h2>
+                <p>Dispara jobs sem mexer no Railway.</p>
+              </div>
+              <div class="action-grid">
+                <button type="button" class="action" data-action="incremental">
+                  <strong>Sync incremental</strong>
+                  <span>Tickets recentes → msgs novas</span>
+                </button>
+                <button type="button" class="action" data-action="daily">
+                  <strong>Verificação diária</strong>
+                  <span>Msgs + mídia do ciclo</span>
+                </button>
+                <button type="button" class="action" data-action="media">
+                  <strong>Migrar mídia</strong>
+                  <span>Attachments → gosac_media</span>
+                </button>
+                <button type="button" class="action warn" data-action="full">
+                  <strong>Migração completa</strong>
+                  <span>Todos os contatos (lento)</span>
+                </button>
+              </div>
+              <div class="inline-form">
+                <input id="ticketId" type="text" placeholder="Ticket ID" />
+                <label class="check"><input type="checkbox" id="onlyTicket" /> só este ticket</label>
+                <button type="button" class="btn ghost" data-action="ticket">Migrar ticket</button>
+                <button type="button" class="btn danger ghost" data-action="stop">Parar</button>
+              </div>
+            </div>
+
+            <div class="block">
+              <div class="block-head">
+                <h2>Job ativo</h2>
+                <span class="badge" id="jobBadge">idle</span>
+              </div>
+              <pre class="console" id="jobLog">Nenhum job em execução.</pre>
+            </div>
+          </div>
+
+          <div class="block">
+            <div class="block-head">
+              <h2>Mensagens recentes no CouchDB</h2>
+              <p>Amostra ordenada por createdAt (scan limitado).</p>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Quando</th>
+                    <th>Contato</th>
+                    <th>Ticket</th>
+                    <th>Preview</th>
+                  </tr>
+                </thead>
+                <tbody id="msgTable"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- SYNC -->
+        <section class="view" id="view-sync">
+          <div class="block">
+            <div class="block-head">
+              <h2>Sync contínuo</h2>
+              <p>Mantém o CouchDB alimentado enquanto novas msgs chegam no Gosac.</p>
+            </div>
+            <div class="form-grid">
+              <label class="switch">
+                <input type="checkbox" id="cfgContinuous" />
+                <span>Ativar sync contínuo</span>
+              </label>
+              <label>
+                Intervalo (minutos)
+                <input type="number" id="cfgInterval" min="1" max="1440" value="5" />
+              </label>
+              <label>
+                Max tickets / ciclo
+                <input type="number" id="cfgMaxTickets" min="1" max="500" value="40" />
+              </label>
+              <label>
+                Páginas de msgs / ticket
+                <input type="number" id="cfgMsgPages" min="1" max="50" value="3" />
+              </label>
+            </div>
+          </div>
+
+          <div class="block">
+            <div class="block-head">
+              <h2>Verificação diária</h2>
+              <p>Varredura agendada — msgs do dia e documentos/mídia.</p>
+            </div>
+            <div class="form-grid">
+              <label class="switch">
+                <input type="checkbox" id="cfgDaily" />
+                <span>Ativar verificação diária</span>
+              </label>
+              <label>
+                Hora (0–23)
+                <input type="number" id="cfgDailyHour" min="0" max="23" value="6" />
+              </label>
+              <label>
+                Minuto
+                <input type="number" id="cfgDailyMinute" min="0" max="59" value="0" />
+              </label>
+              <label class="switch">
+                <input type="checkbox" id="cfgDailyMedia" checked />
+                <span>Incluir mídia</span>
+              </label>
+            </div>
+            <p class="meta" id="scheduleHint">Agenda: —</p>
+            <div class="row">
+              <button type="button" class="btn primary" id="btnSaveSchedule">Salvar agenda</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- JOBS -->
+        <section class="view" id="view-jobs">
+          <div class="block">
+            <div class="block-head">
+              <h2>Histórico de jobs</h2>
+              <p>Clique para ver os logs.</p>
+            </div>
+            <ul class="job-list" id="jobList"></ul>
+          </div>
+          <div class="block">
+            <div class="block-head">
+              <h2>Console</h2>
+              <span class="badge" id="jobBadge2">idle</span>
+            </div>
+            <pre class="console tall" id="jobLog2">Selecione um job.</pre>
+            <div class="inline-form">
+              <label>
+                Max contatos (full)
+                <input type="number" id="maxContacts" min="1" placeholder="todos" />
+              </label>
+              <label class="check">
+                <input type="checkbox" id="resetOnFull" />
+                reset checkpoint no full
+              </label>
+              <button type="button" class="btn warn" data-action="full">Rodar full</button>
+              <button type="button" class="btn danger ghost" data-action="reset-checkpoint">
+                Zerar checkpoint
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <!-- DATABASES -->
+        <section class="view" id="view-databases">
+          <div class="block">
+            <div class="block-head">
+              <h2>Database de destino</h2>
+              <p>
+                Problema comum: <code>.env</code> em <strong>gosac_geral</strong> em vez de
+                <strong>gosac_messages</strong>. Corrija aqui — vale na hora.
+              </p>
+            </div>
+            <div class="form-grid">
+              <label>
+                Mensagens
+                <input id="cfgMessageDb" list="dbList" placeholder="gosac_messages" />
+              </label>
+              <label>
+                Mídia
+                <input id="cfgMediaDb" list="dbList" placeholder="gosac_media" />
+              </label>
+              <datalist id="dbList"></datalist>
+            </div>
+            <p class="meta" id="envDbHint"></p>
+            <div class="row">
+              <button type="button" class="btn primary" id="btnSaveDb">Salvar databases</button>
+              <button type="button" class="btn ghost" id="btnCompare">
+                Comparar geral × messages
+              </button>
+            </div>
+            <pre class="console" id="compareBox" hidden></pre>
+          </div>
+
+          <div class="metric-row twin" id="compareMetrics" hidden>
+            <article class="metric">
+              <span>gosac_geral</span>
+              <strong id="cmpGeralDocs">—</strong>
+              <em id="cmpGeralMig">—</em>
+            </article>
+            <article class="metric">
+              <span>gosac_messages</span>
+              <strong id="cmpMsgDocs">—</strong>
+              <em id="cmpMsgMig">—</em>
+            </article>
+          </div>
+        </section>
+
+        <!-- SETTINGS -->
+        <section class="view" id="view-settings">
+          <div class="block">
+            <div class="block-head">
+              <h2>Atualização do painel</h2>
+              <p>
+                Controla de quanto em quanto tempo a UI consulta o CouchDB
+                (<code>/api/status</code>). Não é o sync de mensagens.
+              </p>
+            </div>
+            <div class="form-grid">
+              <label>
+                Intervalo do status (segundos)
+                <input type="number" id="cfgStatusPoll" min="5" max="600" value="30" />
+              </label>
+              <label class="switch">
+                <input type="checkbox" id="cfgStatusPollEnabled" checked />
+                <span>Atualização automática ligada</span>
+              </label>
+            </div>
+            <p class="meta" id="pollHint">Padrão: 30s. Mínimo 5s.</p>
+            <div class="row">
+              <button type="button" class="btn primary" id="btnSavePoll">Salvar intervalo</button>
+            </div>
+          </div>
+
+          <div class="block">
+            <div class="block-head">
+              <h2>Como usar este sistema</h2>
+            </div>
+            <ol class="howto">
+              <li>
+                Em <strong>Databases</strong>, defina mensagens =
+                <code>gosac_messages</code> (não <code>gosac_geral</code>) e salve.
+              </li>
+              <li>
+                Clique <strong>Sync agora</strong> (ou Sync incremental) para puxar
+                msgs novas desde a última parada (~23/07).
+              </li>
+              <li>
+                Em <strong>Sync &amp; agenda</strong>, ligue o sync contínuo
+                (ex.: a cada 5–15 min) para manter alimentando.
+              </li>
+              <li>
+                Opcional: ligue a verificação diária (msgs + mídia) numa hora baixa.
+              </li>
+              <li>
+                Use <strong>Migrar mídia</strong> quando quiser baixar anexos para
+                <code>gosac_media</code>.
+              </li>
+              <li>
+                Migração completa só se precisar reprocessar contatos inteiros —
+                é lenta; o incremental basta no dia a dia.
+              </li>
+            </ol>
+          </div>
+
+          <div class="block">
+            <div class="block-head">
+              <h2>Ambiente</h2>
+              <p>Somente leitura — valores vindos do processo Node.</p>
+            </div>
+            <dl class="kv" id="envKv"></dl>
+          </div>
+          <div class="block">
+            <div class="block-head">
+              <h2>Checkpoint local</h2>
+              <p>Contatos já processados na migração completa.</p>
+            </div>
+            <dl class="kv" id="checkpointKv"></dl>
+          </div>
+        </section>
+
+        <footer class="footer" id="footMeta"></footer>
+      </div>
+    </div>
+
+    <div class="toast" id="toast" hidden></div>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

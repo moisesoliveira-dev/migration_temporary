@@ -2,16 +2,21 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from '../config.js';
+import { startControlPanel } from '../server/index.js';
 
 /**
- * Entry point do Railway.
- * Roda as migrações conforme as flags:
- * - MIGRATE_ENABLED=true        → mensagens (gosac → COUCHDB_DATABASE)
- * - MEDIA_MIGRATE_ENABLED=true  → arquivos (COUCHDB_DATABASE → COUCHDB_MEDIA_DATABASE)
+ * Entry point do Railway / produção.
  *
- * Se as duas estiverem false, encerra sem erro (deploy "parado").
+ * - CONTROL_PANEL=true  → sobe painel web (sync contínuo/diário + jobs)
+ * - senão: one-shot pelas flags MIGRATE_* (comportamento antigo)
  */
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+function envFlag(name, defaultValue = false) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return defaultValue;
+  return ['1', 'true', 'yes', 'on'].includes(String(raw).trim().toLowerCase());
+}
 
 function runNodeScript(scriptName) {
   return new Promise((resolve, reject) => {
@@ -30,10 +35,17 @@ function runNodeScript(scriptName) {
 }
 
 async function main() {
+  if (envFlag('CONTROL_PANEL', false)) {
+    console.log('CONTROL_PANEL=true — iniciando painel de controle (processo persistente).');
+    await startControlPanel();
+    return;
+  }
+
   const runMessages = config.migrateEnabled;
   const runMedia = config.mediaMigrateEnabled;
 
   console.log('Controle de deploy:');
+  console.log(`  CONTROL_PANEL=false (one-shot)`);
   console.log(`  MIGRATE_ENABLED=${runMessages}`);
   console.log(`  MEDIA_MIGRATE_ENABLED=${runMedia}`);
 
@@ -41,11 +53,10 @@ async function main() {
     console.log(
       'Nenhuma migração ligada. Deploy ok; nenhum dado foi alterado no CouchDB.',
     );
+    console.log('Dica: use CONTROL_PANEL=true para o painel web com sync contínuo.');
     process.exit(0);
   }
 
-  // Força os scripts filhos a rodarem mesmo se a flag interna estiver inconsistente:
-  // eles leem as mesmas env vars.
   if (runMessages) {
     await runNodeScript('migrate.js');
   }

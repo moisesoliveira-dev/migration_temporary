@@ -8,6 +8,7 @@
   },
   "scripts": {
     "start": "node src/scripts/start.js",
+    "panel": "node src/scripts/panel.js",
     "fetch:tickets": "node src/scripts/fetch-tickets.js",
     "fetch:messages": "node src/scripts/fetch-messages.js",
     "migrate": "node src/scripts/migrate.js",

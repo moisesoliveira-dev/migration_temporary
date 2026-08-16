@@ -1,5 +1,5 @@
-import nano from 'nano';
-import { config } from '../config.js';
+import nano from "nano";
+import { config } from "../config.js";
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -7,16 +7,16 @@ function sleep(ms) {
 
 function isRetryableCouchError(error) {
   const code = error.code || error.cause?.code;
-  const reason = String(error.reason || error.message || '');
+  const reason = String(error.reason || error.message || "");
   return (
-    code === 'ETIMEDOUT' ||
-    code === 'ECONNRESET' ||
-    code === 'ECONNREFUSED' ||
-    code === 'ENOTFOUND' ||
-    code === 'EAI_AGAIN' ||
-    reason.includes('ETIMEDOUT') ||
-    reason.includes('ECONNRESET') ||
-    reason.includes('ECONNREFUSED') ||
+    code === "ETIMEDOUT" ||
+    code === "ECONNRESET" ||
+    code === "ECONNREFUSED" ||
+    code === "ENOTFOUND" ||
+    code === "EAI_AGAIN" ||
+    reason.includes("ETIMEDOUT") ||
+    reason.includes("ECONNRESET") ||
+    reason.includes("ECONNREFUSED") ||
     error.statusCode === 429 ||
     error.statusCode >= 500
   );
@@ -41,10 +41,14 @@ async function withCouchRetry(label, fn) {
     }
   }
 
-  const detail = lastError?.code || lastError?.reason || lastError?.message || String(lastError);
+  const detail =
+    lastError?.code ||
+    lastError?.reason ||
+    lastError?.message ||
+    String(lastError);
   throw new Error(
     `${label} falhou após ${retries} tentativas: ${detail}. ` +
-      'O Railway precisa alcançar o CouchDB na porta 443. Verifique firewall/IP liberado e se o servidor está no ar.',
+      "O Railway precisa alcançar o CouchDB na porta 443. Verifique firewall/IP liberado e se o servidor está no ar.",
   );
 }
 
@@ -75,7 +79,7 @@ export async function getCouchDatabase(dbName = config.couchdb.database) {
  */
 export async function upsertDoc(db, doc) {
   if (!doc._id) {
-    throw new Error('Documento CouchDB precisa de _id');
+    throw new Error("Documento CouchDB precisa de _id");
   }
 
   try {
@@ -108,8 +112,8 @@ export async function docExists(db, id) {
 export function messageToDoc(message, ticket) {
   return {
     _id: `msg:${message.id}`,
-    type: 'message',
-    source: 'gosac',
+    type: "message",
+    source: "gosac",
     ticketId: message.ticketId ?? ticket?.id,
     ticket: ticket
       ? {
