@@ -193,13 +193,15 @@ export function createJobManager() {
             type: 'log',
             level: 'info',
             message:
-              'Verificação diária: catch-up desde o watermark (sem teto de páginas/tickets). Mídia só das msgs novas.',
+              'Verificação diária: tickets atualizados no dia + catch-up desde o watermark (sem teto de páginas). Mídia só das msgs novas.',
           });
 
           const sync = await runCatchUpSync(
             {
               database: jobOpts.database,
               idleTicketsToStop: jobOpts.idleTicketsToStop ?? 40,
+              onlyUpdatedToday: jobOpts.onlyUpdatedToday !== false,
+              timezoneOffsetHours: jobOpts.timezoneOffsetHours ?? -3,
             },
             onProgress,
             shouldStop,

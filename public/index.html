@@ -200,9 +200,9 @@
             <div class="block-head">
               <h2>Verificação diária</h2>
               <p>
-                Catch-up desde a última mensagem no CouchDB (watermark), sem teto
-                de páginas/tickets. Mídia: todos os anexos das msgs novas desde o
-                watermark (sem limite de 300).
+                À hora marcada, pega tickets <strong>atualizados no dia</strong>
+                (updatedAt / lastMessage) e faz catch-up desde o watermark —
+                sem teto de páginas. Mídia: anexos das msgs novas do período.
               </p>
             </div>
             <div class="form-grid">
@@ -210,20 +210,31 @@
                 <input type="checkbox" id="cfgDaily" />
                 <span>Ativar verificação diária</span>
               </label>
-              <label>
-                Hora (0–23)
-                <input type="number" id="cfgDailyHour" min="0" max="23" value="6" />
-              </label>
-              <label>
-                Minuto
-                <input type="number" id="cfgDailyMinute" min="0" max="59" value="0" />
-              </label>
               <label class="switch">
                 <input type="checkbox" id="cfgDailyMedia" checked />
-                <span>Incluir mídia</span>
+                <span>Incluir mídia das msgs novas</span>
+              </label>
+              <label class="time-field">
+                Horário diário
+                <div class="time-row">
+                  <input type="time" id="cfgDailyTime" value="06:00" step="60" />
+                  <span class="time-tz" title="Fuso usado no agendamento">UTC−3 (Brasília)</span>
+                </div>
+                <small class="field-hint">Escolha hora e minuto. Roda todo dia nesse horário.</small>
+              </label>
+              <label>
+                Fuso (offset horas)
+                <select id="cfgDailyTz">
+                  <option value="-5">UTC−5</option>
+                  <option value="-4">UTC−4</option>
+                  <option value="-3" selected>UTC−3 (Brasília)</option>
+                  <option value="-2">UTC−2</option>
+                  <option value="0">UTC</option>
+                </select>
               </label>
             </div>
             <p class="meta" id="scheduleHint">Agenda: —</p>
+            <p class="meta" id="dailyNextHint"></p>
             <div class="row">
               <button type="button" class="btn primary" id="btnSaveSchedule">Salvar agenda</button>
             </div>

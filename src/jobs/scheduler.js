@@ -107,6 +107,8 @@ export function createScheduler(jobManager) {
         try {
           await jobManager.runDailyCheck({
             includeMedia: s.dailyCheck.includeMedia,
+            timezoneOffsetHours: s.dailyCheck.timezoneOffsetHours ?? -3,
+            onlyUpdatedToday: true,
           });
           lastDailyAt = new Date().toISOString();
           lastDailyError = null;

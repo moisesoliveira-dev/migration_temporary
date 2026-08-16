@@ -171,8 +171,13 @@ async function refreshStatus() {
     document.getElementById("cfgDaily").checked = Boolean(
       s.dailyCheck?.enabled,
     );
-    document.getElementById("cfgDailyHour").value = s.dailyCheck?.hour ?? 6;
-    document.getElementById("cfgDailyMinute").value = s.dailyCheck?.minute ?? 0;
+    const hour = s.dailyCheck?.hour ?? 6;
+    const minute = s.dailyCheck?.minute ?? 0;
+    document.getElementById("cfgDailyTime").value =
+      `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+    document.getElementById("cfgDailyTz").value = String(
+      s.dailyCheck?.timezoneOffsetHours ?? -3,
+    );
     document.getElementById("cfgDailyMedia").checked =
       s.dailyCheck?.includeMedia !== false;
 
@@ -186,6 +191,10 @@ async function refreshStatus() {
         ? ` · último sync mídia ${fmtDate(sch.lastContinuousMediaAt)}`
         : "") +
       (sch.lastDailyAt ? ` · último daily ${fmtDate(sch.lastDailyAt)}` : "");
+
+    document.getElementById("dailyNextHint").textContent = s.dailyCheck?.enabled
+      ? `Próxima verificação: todo dia às ${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")} (UTC${(s.dailyCheck.timezoneOffsetHours ?? -3) >= 0 ? "+" : ""}${s.dailyCheck.timezoneOffsetHours ?? -3}) — tickets atualizados no dia.`
+      : "Verificação diária desligada.";
 
     document.getElementById("envDbHint").textContent =
       `fallback .env mensagens=${status.env?.couchdbDatabaseEnv || "—"} · mídia=${status.env?.couchdbMediaDatabaseEnv || "—"}`;
@@ -313,6 +322,8 @@ async function saveDatabases() {
 }
 
 async function saveSchedule() {
+  const timeRaw = document.getElementById("cfgDailyTime").value || "06:00";
+  const [hourStr, minuteStr] = timeRaw.split(":");
   await api("/api/settings", {
     method: "PUT",
     body: JSON.stringify({
@@ -332,8 +343,9 @@ async function saveSchedule() {
       },
       dailyCheck: {
         enabled: document.getElementById("cfgDaily").checked,
-        hour: Number(document.getElementById("cfgDailyHour").value) || 0,
-        minute: Number(document.getElementById("cfgDailyMinute").value) || 0,
+        hour: Number(hourStr) || 0,
+        minute: Number(minuteStr) || 0,
+        timezoneOffsetHours: Number(document.getElementById("cfgDailyTz").value),
         includeMedia: document.getElementById("cfgDailyMedia").checked,
       },
     }),
@@ -410,6 +422,14 @@ document.getElementById("btnSaveDb").addEventListener("click", () => {
 });
 document.getElementById("btnSaveSchedule").addEventListener("click", () => {
   saveSchedule().catch((e) => toast(e.message));
+});
+
+document.getElementById("cfgDailyTz").addEventListener("change", () => {
+  const off = Number(document.getElementById("cfgDailyTz").value);
+  const label = document.querySelector(".time-tz");
+  if (label) {
+    label.textContent = `UTC${off >= 0 ? "+" : "−"}${Math.abs(off)}${off === -3 ? " (Brasília)" : ""}`;
+  }
 });
 document.getElementById("btnCompare").addEventListener("click", async () => {
   const box = document.getElementById("compareBox");

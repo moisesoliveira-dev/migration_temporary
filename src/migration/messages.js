@@ -23,6 +23,36 @@ function messageTime(message) {
 }
 
 /**
+ * Início do "dia civil" no fuso com offset fixo (ex.: -3 = Brasil).
+ * Retorna timestamp UTC.
+ */
+export function startOfDayTimestamp(offsetHours = -3, when = new Date()) {
+  const shifted = new Date(when.getTime() + offsetHours * 3_600_000);
+  const y = shifted.getUTCFullYear();
+  const m = shifted.getUTCMonth();
+  const d = shifted.getUTCDate();
+  return Date.UTC(y, m, d) - offsetHours * 3_600_000;
+}
+
+/** Melhor estimativa de "última atualização" do ticket no Gosac. */
+export function ticketUpdatedTimestamp(ticket) {
+  const candidates = [
+    ticket?.updatedAt,
+    ticket?.updated_at,
+    ticket?.lastMessage?.createdAt,
+    ticket?.lastMessage?.updatedAt,
+    ticket?.lastMessageDate,
+    ticket?.lastMessageAt,
+  ];
+  for (const value of candidates) {
+    if (!value) continue;
+    const ts = new Date(value).getTime();
+    if (!Number.isNaN(ts)) return ts;
+  }
+  return 0;
+}
+
+/**
  * Migração completa por contato (histórico inteiro).
  * @param {object} opts
  * @param {(event: object) => void} [onProgress]
@@ -209,11 +239,8 @@ export async function runFullMessageMigration(opts = {}, onProgress = () => {}, 
 
 /**
  * Catch-up a partir da última mensagem no CouchDB (watermark).
- * Sem limite artificial de páginas/tickets: para cada ticket pagina até
- * entrar em msgs <= watermark (já conhecidas). Para quando vários tickets
- * seguidos não trouxerem nada novo.
- *
- * Usado pela verificação diária.
+ * Por padrão (verificação diária) só processa tickets atualizados no dia
+ * (updatedAt / lastMessage), no fuso configurado — sem teto de páginas.
  */
 export async function runCatchUpSync(opts = {}, onProgress = () => {}, shouldStop = () => false) {
   const {
@@ -223,6 +250,9 @@ export async function runCatchUpSync(opts = {}, onProgress = () => {}, shouldSto
     status,
     /** tickets seguidos sem msg nova → encerra a varredura */
     idleTicketsToStop = 40,
+    /** só tickets com updatedAt no dia civil atual */
+    onlyUpdatedToday = true,
+    timezoneOffsetHours = -3,
   } = opts;
 
   const dbName = database || (await getMessageDatabaseName());
@@ -232,6 +262,9 @@ export async function runCatchUpSync(opts = {}, onProgress = () => {}, shouldSto
   const watermarkTs = watermarkInfo.newestCreatedAt
     ? new Date(watermarkInfo.newestCreatedAt).getTime()
     : 0;
+  const dayStartTs = onlyUpdatedToday
+    ? startOfDayTimestamp(timezoneOffsetHours)
+    : null;
 
   onProgress({
     type: 'start',
@@ -239,6 +272,8 @@ export async function runCatchUpSync(opts = {}, onProgress = () => {}, shouldSto
     database: dbName,
     watermark: watermarkInfo.newestCreatedAt,
     watermarkSource: watermarkInfo.source,
+    onlyUpdatedToday,
+    dayStart: dayStartTs ? new Date(dayStartTs).toISOString() : null,
   });
   onProgress({
     type: 'log',
@@ -247,12 +282,21 @@ export async function runCatchUpSync(opts = {}, onProgress = () => {}, shouldSto
       ? `Watermark: ${watermarkInfo.newestCreatedAt} (fonte=${watermarkInfo.source}). Buscando msgs posteriores.`
       : 'Sem watermark — catch-up até encontrar msgs já no CouchDB (sem teto de páginas).',
   });
+  if (dayStartTs != null) {
+    onProgress({
+      type: 'log',
+      level: 'info',
+      message: `Filtro: só tickets atualizados desde ${new Date(dayStartTs).toISOString()} (UTC${timezoneOffsetHours >= 0 ? '+' : ''}${timezoneOffsetHours}).`,
+    });
+  }
 
   let ticketsScanned = 0;
+  let ticketsSkippedOld = 0;
   let totalOk = 0;
   let totalSkipped = 0;
   let totalFail = 0;
   let consecutiveIdle = 0;
+  let consecutiveOldTickets = 0;
   let ticketPage = 1;
   let hasMore = true;
   let newestSeen = watermarkInfo.newestCreatedAt;
@@ -270,6 +314,22 @@ export async function runCatchUpSync(opts = {}, onProgress = () => {}, shouldSto
 
     for (const ticket of tickets) {
       if (shouldStop() || consecutiveIdle >= idleTicketsToStop) break;
+
+      if (dayStartTs != null) {
+        const updatedTs = ticketUpdatedTimestamp(ticket);
+        if (!updatedTs || updatedTs < dayStartTs) {
+          ticketsSkippedOld += 1;
+          consecutiveOldTickets += 1;
+          // lista em order=desc: muitos tickets velhos seguidos → fim do dia
+          if (consecutiveOldTickets >= 25) {
+            hasMore = false;
+            break;
+          }
+          continue;
+        }
+        consecutiveOldTickets = 0;
+      }
+
       ticketsScanned += 1;
 
       const contactName = ticket.contact?.name || `ticket ${ticket.id}`;
@@ -375,6 +435,7 @@ export async function runCatchUpSync(opts = {}, onProgress = () => {}, shouldSto
       });
     }
 
+    if (!hasMore) break;
     hasMore = more && tickets.length > 0;
     ticketPage += 1;
     if (hasMore && pageDelayMs > 0) await sleep(pageDelayMs);
@@ -393,15 +454,19 @@ export async function runCatchUpSync(opts = {}, onProgress = () => {}, shouldSto
     watermarkBefore: watermarkInfo.newestCreatedAt,
     watermarkAfter: newestSeen,
     ticketsScanned,
+    ticketsSkippedOld,
+    dayStart: dayStartTs ? new Date(dayStartTs).toISOString() : null,
     totalOk,
     totalSkipped,
     totalFail,
     stoppedReason:
       consecutiveIdle >= idleTicketsToStop
         ? `idle_tickets_${idleTicketsToStop}`
-        : shouldStop()
-          ? 'stopped'
-          : 'exhausted_tickets',
+        : consecutiveOldTickets >= 25
+          ? 'past_today_tickets'
+          : shouldStop()
+            ? 'stopped'
+            : 'exhausted_tickets',
   };
   onProgress({ type: 'done', ...result });
   return result;
