@@ -1,0 +1,23 @@
+{
+  "CONTROL_PANEL": "true",
+  "PORT": "8080",
+  "ADMIN_TOKEN": "TROQUE_POR_UM_SEGREDO_FORTE",
+
+  "MIGRATE_ENABLED": "false",
+  "MEDIA_MIGRATE_ENABLED": "false",
+
+  "GOSAC_BASE_URL": "https://cmmodulados.gosac.com.br",
+  "GOSAC_API_KEY": "COLE_SUA_GOSAC_API_KEY",
+  "GOSAC_TIMEOUT_MS": "120000",
+  "GOSAC_RETRIES": "3",
+  "GOSAC_RETRY_DELAY_MS": "2000",
+
+  "COUCHDB_URL": "https://admin:SENHA@seu-couchdb.exemplo",
+  "COUCHDB_DATABASE": "gosac_messages",
+  "COUCHDB_MEDIA_DATABASE": "gosac_media",
+  "COUCHDB_RETRIES": "5",
+  "COUCHDB_RETRY_DELAY_MS": "5000",
+
+  "CONTROL_SETTINGS_FILE": "/data/.control-settings.json",
+  "MIGRATION_STATE_FILE": "/data/.migration-state.json"
+}

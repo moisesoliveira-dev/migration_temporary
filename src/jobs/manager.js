@@ -3,6 +3,7 @@ import {
   runFullMessageMigration,
   runIncrementalSync,
   runTicketMigration,
+  runCatchUpSync,
 } from '../migration/messages.js';
 import { runMediaMigration } from '../migration/media.js';
 
@@ -74,8 +75,14 @@ export function createJobManager() {
 
   async function runJob(type, runner, opts = {}) {
     if (activeJobId) {
-      const err = new Error(`Já existe um job em execução: ${activeJobId}`);
+      const active = jobs.get(activeJobId);
+      const activeLabel = active?.type || activeJobId;
+      const err = new Error(
+        `Job bloqueado: "${activeLabel}" ainda está rodando. Mensagens e mídia não operam juntos (manual ou contínuo). Pare o job ativo ou aguarde terminar.`,
+      );
       err.code = 'JOB_BUSY';
+      err.activeJobId = activeJobId;
+      err.activeJobType = active?.type || null;
       throw err;
     }
 
@@ -178,25 +185,32 @@ export function createJobManager() {
     },
 
     async runDailyCheck(opts = {}) {
-      // daily: incremental + optional media (sequential via busy lock — run as one composite job)
       return runJob(
         'daily-check',
         async (jobOpts, onProgress, shouldStop) => {
           onProgress({ type: 'start', job: 'daily-check' });
-          const sync = await runIncrementalSync(
+          onProgress({
+            type: 'log',
+            level: 'info',
+            message:
+              'Verificação diária: catch-up desde o watermark (sem teto de páginas/tickets). Mídia só das msgs novas.',
+          });
+
+          const sync = await runCatchUpSync(
             {
-              maxTickets: jobOpts.maxTickets ?? 80,
-              messagePages: jobOpts.messagePages ?? 5,
               database: jobOpts.database,
+              idleTicketsToStop: jobOpts.idleTicketsToStop ?? 40,
             },
             onProgress,
             shouldStop,
           );
+
           let media = null;
           if (jobOpts.includeMedia && !shouldStop()) {
             media = await runMediaMigration(
               {
-                max: jobOpts.mediaMax ?? 200,
+                max: Infinity,
+                onlyAfterCreatedAt: sync.watermarkBefore || null,
                 sourceDatabase: jobOpts.database,
                 mediaDatabase: jobOpts.mediaDatabase,
               },
@@ -204,8 +218,15 @@ export function createJobManager() {
               shouldStop,
             );
           }
+
           const result = { sync, media, stopped: shouldStop() };
-          onProgress({ type: 'done', ...result, totalOk: sync.totalOk, totalSkipped: sync.totalSkipped, totalFail: sync.totalFail });
+          onProgress({
+            type: 'done',
+            ...result,
+            totalOk: sync.totalOk,
+            totalSkipped: sync.totalSkipped,
+            totalFail: sync.totalFail,
+          });
           return result;
         },
         opts,

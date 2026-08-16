@@ -161,6 +161,13 @@ async function refreshStatus() {
       s.continuousSync?.maxTickets ?? 40;
     document.getElementById("cfgMsgPages").value =
       s.continuousSync?.messagePages ?? 3;
+    document.getElementById("cfgContinuousMedia").checked = Boolean(
+      s.continuousMedia?.enabled,
+    );
+    document.getElementById("cfgMediaInterval").value =
+      s.continuousMedia?.intervalMinutes ?? 15;
+    document.getElementById("cfgMediaMax").value =
+      s.continuousMedia?.maxPerCycle ?? 80;
     document.getElementById("cfgDaily").checked = Boolean(
       s.dailyCheck?.enabled,
     );
@@ -171,9 +178,12 @@ async function refreshStatus() {
 
     const sch = status.scheduler;
     document.getElementById("scheduleHint").textContent =
-      `contínuo=${sch.continuousTimer ? "on" : "off"} · diário=${sch.dailyTimer ? "agendado" : "off"}` +
+      `msgs=${sch.continuousTimer ? "on" : "off"} · mídia=${sch.continuousMediaTimer ? "on" : "off"} · diário=${sch.dailyTimer ? "agendado" : "off"}` +
       (sch.lastContinuousAt
-        ? ` · último sync ${fmtDate(sch.lastContinuousAt)}`
+        ? ` · último sync msgs ${fmtDate(sch.lastContinuousAt)}`
+        : "") +
+      (sch.lastContinuousMediaAt
+        ? ` · último sync mídia ${fmtDate(sch.lastContinuousMediaAt)}`
         : "") +
       (sch.lastDailyAt ? ` · último daily ${fmtDate(sch.lastDailyAt)}` : "");
 
@@ -313,6 +323,12 @@ async function saveSchedule() {
         maxTickets:
           Number(document.getElementById("cfgMaxTickets").value) || 40,
         messagePages: Number(document.getElementById("cfgMsgPages").value) || 3,
+      },
+      continuousMedia: {
+        enabled: document.getElementById("cfgContinuousMedia").checked,
+        intervalMinutes:
+          Number(document.getElementById("cfgMediaInterval").value) || 15,
+        maxPerCycle: Number(document.getElementById("cfgMediaMax").value) || 80,
       },
       dailyCheck: {
         enabled: document.getElementById("cfgDaily").checked,

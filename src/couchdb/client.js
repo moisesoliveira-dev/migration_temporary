@@ -55,10 +55,12 @@ async function withCouchRetry(label, fn) {
 /**
  * Conecta ao CouchDB e garante que o database exista.
  * @param {string} [dbName] nome do database (padrão: COUCHDB_DATABASE)
+ * @param {{ quiet?: boolean }} [options]
  */
-export async function getCouchDatabase(dbName = config.couchdb.database) {
+export async function getCouchDatabase(dbName = config.couchdb.database, options = {}) {
   const name = dbName;
-  console.log(`Conectando ao CouchDB database="${name}"...`);
+  const quiet = Boolean(options.quiet);
+  if (!quiet) console.log(`Conectando ao CouchDB database="${name}"...`);
 
   const couch = await withCouchRetry(`CouchDB list(${name})`, async () => {
     const client = nano(config.couchdb.url);
@@ -70,7 +72,7 @@ export async function getCouchDatabase(dbName = config.couchdb.database) {
     return client;
   });
 
-  console.log(`CouchDB OK: database="${name}"`);
+  if (!quiet) console.log(`CouchDB OK: database="${name}"`);
   return couch.use(name);
 }
 

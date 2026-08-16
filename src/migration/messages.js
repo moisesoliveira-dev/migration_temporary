@@ -2,6 +2,7 @@ import { createGosacClient } from '../gosac/client.js';
 import { docExists, getCouchDatabase, messageToDoc, upsertDoc } from '../couchdb/client.js';
 import { createMigrationState } from './state.js';
 import { getMessageDatabaseName } from '../runtime-config.js';
+import { bumpSyncWatermark, resolveSyncWatermark } from '../couchdb/watermark.js';
 
 function sortByDate(items, field = 'createdAt') {
   return [...items].sort((a, b) => {
@@ -14,6 +15,11 @@ function sortByDate(items, field = 'createdAt') {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function messageTime(message) {
+  const ts = new Date(message.createdAt || 0).getTime();
+  return Number.isNaN(ts) ? 0 : ts;
 }
 
 /**
@@ -202,6 +208,206 @@ export async function runFullMessageMigration(opts = {}, onProgress = () => {}, 
 }
 
 /**
+ * Catch-up a partir da última mensagem no CouchDB (watermark).
+ * Sem limite artificial de páginas/tickets: para cada ticket pagina até
+ * entrar em msgs <= watermark (já conhecidas). Para quando vários tickets
+ * seguidos não trouxerem nada novo.
+ *
+ * Usado pela verificação diária.
+ */
+export async function runCatchUpSync(opts = {}, onProgress = () => {}, shouldStop = () => false) {
+  const {
+    pageDelayMs = 200,
+    messageDelayMs = 5,
+    database,
+    status,
+    /** tickets seguidos sem msg nova → encerra a varredura */
+    idleTicketsToStop = 40,
+  } = opts;
+
+  const dbName = database || (await getMessageDatabaseName());
+  const gosac = createGosacClient();
+  const db = await getCouchDatabase(dbName);
+  const watermarkInfo = await resolveSyncWatermark(dbName);
+  const watermarkTs = watermarkInfo.newestCreatedAt
+    ? new Date(watermarkInfo.newestCreatedAt).getTime()
+    : 0;
+
+  onProgress({
+    type: 'start',
+    job: 'catch-up-sync',
+    database: dbName,
+    watermark: watermarkInfo.newestCreatedAt,
+    watermarkSource: watermarkInfo.source,
+  });
+  onProgress({
+    type: 'log',
+    level: 'info',
+    message: watermarkInfo.newestCreatedAt
+      ? `Watermark: ${watermarkInfo.newestCreatedAt} (fonte=${watermarkInfo.source}). Buscando msgs posteriores.`
+      : 'Sem watermark — catch-up até encontrar msgs já no CouchDB (sem teto de páginas).',
+  });
+
+  let ticketsScanned = 0;
+  let totalOk = 0;
+  let totalSkipped = 0;
+  let totalFail = 0;
+  let consecutiveIdle = 0;
+  let ticketPage = 1;
+  let hasMore = true;
+  let newestSeen = watermarkInfo.newestCreatedAt;
+  let newestSeenId = watermarkInfo.newestMessageId;
+
+  while (hasMore && consecutiveIdle < idleTicketsToStop) {
+    if (shouldStop()) break;
+
+    const { tickets, hasMore: more } = await gosac.getTickets({
+      pageNumber: ticketPage,
+      ...(status ? { status } : {}),
+    });
+
+    if (!tickets.length) break;
+
+    for (const ticket of tickets) {
+      if (shouldStop() || consecutiveIdle >= idleTicketsToStop) break;
+      ticketsScanned += 1;
+
+      const contactName = ticket.contact?.name || `ticket ${ticket.id}`;
+      onProgress({
+        type: 'ticket',
+        ticketId: ticket.id,
+        name: contactName,
+        index: ticketsScanned,
+        max: null,
+      });
+
+      let pageNumber = 1;
+      let newOnTicket = 0;
+      let knownTicket = false;
+      let hitExistingStreak = 0;
+      let reachedOldTerritory = false;
+
+      while (!reachedOldTerritory) {
+        if (shouldStop()) break;
+        const { messages, raw } = await gosac.getMessages(ticket.id, { pageNumber });
+        if (!messages.length) break;
+
+        let newerOrEqualOnPage = 0;
+
+        for (const message of messages) {
+          if (shouldStop()) break;
+          const ts = messageTime(message);
+          const doc = messageToDoc(
+            message,
+            String(message.ticketId) === String(ticket.id) ? ticket : undefined,
+          );
+
+          // Já no/antes do watermark → território conhecido (não é o alvo do catch-up)
+          if (watermarkTs && ts <= watermarkTs) {
+            try {
+              if (await docExists(db, doc._id)) {
+                knownTicket = true;
+                totalSkipped += 1;
+                hitExistingStreak += 1;
+              }
+            } catch {
+              // ignore head errors no território antigo
+            }
+            continue;
+          }
+
+          newerOrEqualOnPage += 1;
+          try {
+            if (await docExists(db, doc._id)) {
+              knownTicket = true;
+              totalSkipped += 1;
+              hitExistingStreak += 1;
+            } else {
+              await upsertDoc(db, doc);
+              totalOk += 1;
+              newOnTicket += 1;
+              hitExistingStreak = 0;
+              if (!newestSeen || ts >= messageTime({ createdAt: newestSeen })) {
+                newestSeen = message.createdAt;
+                newestSeenId = doc._id;
+              }
+            }
+          } catch (error) {
+            totalFail += 1;
+            onProgress({
+              type: 'log',
+              level: 'error',
+              message: `msg ${message.id}: ${error.message}`,
+            });
+          }
+          if (messageDelayMs > 0) await sleep(messageDelayMs);
+        }
+
+        // Página inteira já está no/antes do watermark → ticket alcançou o conhecido
+        const allOnOrBeforeWatermark =
+          watermarkTs > 0 && messages.every((m) => messageTime(m) <= watermarkTs);
+
+        if (allOnOrBeforeWatermark) {
+          reachedOldTerritory = true;
+        } else if (!watermarkTs && hitExistingStreak >= 15) {
+          // sem watermark: ticket conhecido — para ao achar sequência já no Couch
+          knownTicket = true;
+          reachedOldTerritory = true;
+        } else if (!raw?.hasMore) {
+          reachedOldTerritory = true;
+        } else {
+          pageNumber += 1;
+          if (pageDelayMs > 0) await sleep(pageDelayMs);
+        }
+
+        // ticket conhecido: continua páginas sem teto até old territory (já acima)
+        void knownTicket;
+        void newerOrEqualOnPage;
+      }
+
+      if (newOnTicket === 0) consecutiveIdle += 1;
+      else consecutiveIdle = 0;
+
+      onProgress({
+        type: 'log',
+        level: 'info',
+        message: `Ticket #${ticket.id}: novas=${newOnTicket} idle_seq=${consecutiveIdle}/${idleTicketsToStop}`,
+      });
+    }
+
+    hasMore = more && tickets.length > 0;
+    ticketPage += 1;
+    if (hasMore && pageDelayMs > 0) await sleep(pageDelayMs);
+  }
+
+  if (newestSeen) {
+    await bumpSyncWatermark(dbName, {
+      createdAt: newestSeen,
+      messageId: newestSeenId,
+    });
+  }
+
+  const result = {
+    stopped: shouldStop(),
+    database: dbName,
+    watermarkBefore: watermarkInfo.newestCreatedAt,
+    watermarkAfter: newestSeen,
+    ticketsScanned,
+    totalOk,
+    totalSkipped,
+    totalFail,
+    stoppedReason:
+      consecutiveIdle >= idleTicketsToStop
+        ? `idle_tickets_${idleTicketsToStop}`
+        : shouldStop()
+          ? 'stopped'
+          : 'exhausted_tickets',
+  };
+  onProgress({ type: 'done', ...result });
+  return result;
+}
+
+/**
  * Sync incremental: tickets recentes + páginas novas até achar msgs já no CouchDB.
  */
 export async function runIncrementalSync(opts = {}, onProgress = () => {}, shouldStop = () => false) {
@@ -226,6 +432,8 @@ export async function runIncrementalSync(opts = {}, onProgress = () => {}, shoul
   let totalFail = 0;
   let ticketPage = 1;
   let hasMore = true;
+  let newestSeen = null;
+  let newestSeenId = null;
 
   while (hasMore && ticketsScanned < maxTickets) {
     if (shouldStop()) break;
@@ -273,6 +481,11 @@ export async function runIncrementalSync(opts = {}, onProgress = () => {}, shoul
               await upsertDoc(db, doc);
               totalOk += 1;
               hitExistingStreak = 0;
+              const ts = messageTime(message);
+              if (!newestSeen || ts >= messageTime({ createdAt: newestSeen })) {
+                newestSeen = message.createdAt;
+                newestSeenId = doc._id;
+              }
             }
           } catch (error) {
             totalFail += 1;
@@ -294,6 +507,10 @@ export async function runIncrementalSync(opts = {}, onProgress = () => {}, shoul
     hasMore = more && tickets.length > 0;
     ticketPage += 1;
     if (hasMore && pageDelayMs > 0) await sleep(pageDelayMs);
+  }
+
+  if (newestSeen) {
+    await bumpSyncWatermark(dbName, { createdAt: newestSeen, messageId: newestSeenId });
   }
 
   const result = {

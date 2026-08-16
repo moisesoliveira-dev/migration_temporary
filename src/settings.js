@@ -11,6 +11,11 @@ const DEFAULTS = {
     maxTickets: 40,
     messagePages: 3,
   },
+  continuousMedia: {
+    enabled: false,
+    intervalMinutes: 15,
+    maxPerCycle: 80,
+  },
   dailyCheck: {
     enabled: false,
     hour: 6,
@@ -41,6 +46,7 @@ function mergeSettings(raw) {
     ...base,
     ...raw,
     continuousSync: { ...base.continuousSync, ...(raw.continuousSync || {}) },
+    continuousMedia: { ...base.continuousMedia, ...(raw.continuousMedia || {}) },
     dailyCheck: { ...base.dailyCheck, ...(raw.dailyCheck || {}) },
   };
 }
@@ -60,6 +66,7 @@ export async function saveSettings(patch) {
     ...current,
     ...patch,
     continuousSync: { ...current.continuousSync, ...(patch.continuousSync || {}) },
+    continuousMedia: { ...current.continuousMedia, ...(patch.continuousMedia || {}) },
     dailyCheck: { ...current.dailyCheck, ...(patch.dailyCheck || {}) },
     updatedAt: new Date().toISOString(),
   });

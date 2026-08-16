@@ -163,12 +163,15 @@ export async function runMediaMigration(opts = {}, onProgress = () => {}, should
     max = Infinity,
     sourceDatabase,
     mediaDatabase,
+    /** Só processa msgs com createdAt estritamente depois deste ISO (catch-up diário) */
+    onlyAfterCreatedAt = null,
   } = opts;
 
   const sourceName = sourceDatabase || (await getMessageDatabaseName());
   const mediaName = mediaDatabase || (await getMediaDatabaseName());
   const sourceDb = await getCouchDatabase(sourceName);
   const mediaDb = await getCouchDatabase(mediaName);
+  const afterTs = onlyAfterCreatedAt ? new Date(onlyAfterCreatedAt).getTime() : null;
 
   const startedAt = new Date().toISOString();
   onProgress({
@@ -176,7 +179,16 @@ export async function runMediaMigration(opts = {}, onProgress = () => {}, should
     job: 'migrate-media',
     sourceDatabase: sourceName,
     mediaDatabase: mediaName,
+    onlyAfterCreatedAt,
+    max: max === Infinity ? null : max,
   });
+  if (onlyAfterCreatedAt) {
+    onProgress({
+      type: 'log',
+      level: 'info',
+      message: `Mídia apenas para msgs com createdAt > ${onlyAfterCreatedAt} (sem teto de quantidade).`,
+    });
+  }
 
   let scanned = 0;
   let withMedia = 0;
@@ -190,6 +202,12 @@ export async function runMediaMigration(opts = {}, onProgress = () => {}, should
   for await (const doc of iterateMessageDocs(sourceDb)) {
     if (shouldStop()) break;
     scanned += 1;
+
+    if (afterTs != null) {
+      const ts = new Date(doc.createdAt || 0).getTime();
+      if (Number.isNaN(ts) || ts <= afterTs) continue;
+    }
+
     const media = pickMediaUrl(doc);
     if (!media) continue;
 

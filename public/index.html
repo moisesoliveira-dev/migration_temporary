@@ -148,13 +148,13 @@
         <section class="view" id="view-sync">
           <div class="block">
             <div class="block-head">
-              <h2>Sync contínuo</h2>
-              <p>Mantém o CouchDB alimentado enquanto novas msgs chegam no Gosac.</p>
+              <h2>Sync contínuo — mensagens</h2>
+              <p>Tickets recentes → msgs novas no CouchDB.</p>
             </div>
             <div class="form-grid">
               <label class="switch">
                 <input type="checkbox" id="cfgContinuous" />
-                <span>Ativar sync contínuo</span>
+                <span>Ativar sync contínuo de mensagens</span>
               </label>
               <label>
                 Intervalo (minutos)
@@ -173,8 +173,37 @@
 
           <div class="block">
             <div class="block-head">
+              <h2>Sync contínuo — documentos / mídia</h2>
+              <p>
+                Baixa anexos para <code>gosac_media</code>. Nunca roda junto com
+                migração de mensagens (manual ou contínua): se um estiver ativo, o
+                outro espera.
+              </p>
+            </div>
+            <div class="form-grid">
+              <label class="switch">
+                <input type="checkbox" id="cfgContinuousMedia" />
+                <span>Ativar sync contínuo de mídia</span>
+              </label>
+              <label>
+                Intervalo (minutos)
+                <input type="number" id="cfgMediaInterval" min="1" max="1440" value="15" />
+              </label>
+              <label>
+                Max arquivos / ciclo
+                <input type="number" id="cfgMediaMax" min="1" max="2000" value="80" />
+              </label>
+            </div>
+          </div>
+
+          <div class="block">
+            <div class="block-head">
               <h2>Verificação diária</h2>
-              <p>Varredura agendada — msgs do dia e documentos/mídia.</p>
+              <p>
+                Catch-up desde a última mensagem no CouchDB (watermark), sem teto
+                de páginas/tickets. Mídia: todos os anexos das msgs novas desde o
+                watermark (sem limite de 300).
+              </p>
             </div>
             <div class="form-grid">
               <label class="switch">
@@ -318,8 +347,9 @@
                 msgs novas desde a última parada (~23/07).
               </li>
               <li>
-                Em <strong>Sync &amp; agenda</strong>, ligue o sync contínuo
-                (ex.: a cada 5–15 min) para manter alimentando.
+                Em <strong>Sync &amp; agenda</strong>, ligue sync contínuo de
+                <strong>mensagens</strong> e/ou <strong>mídia</strong>. Eles nunca
+                rodam ao mesmo tempo: se um estiver ativo, o outro espera.
               </li>
               <li>
                 Opcional: ligue a verificação diária (msgs + mídia) numa hora baixa.
