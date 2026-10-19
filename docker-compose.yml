@@ -1,0 +1,19 @@
+services:
+  migration:
+    build: .
+    image: gosac-migration
+    container_name: gosac-migration
+    ports:
+      - "${PORT:-8080}:8080"
+    env_file:
+      - .env
+    environment:
+      PORT: "8080"
+      CONTROL_SETTINGS_FILE: /data/.control-settings.json
+      MIGRATION_STATE_FILE: /data/.migration-state.json
+    volumes:
+      - migration-data:/data
+    restart: unless-stopped
+
+volumes:
+  migration-data:
