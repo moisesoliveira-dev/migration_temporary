@@ -1,7 +1,7 @@
 services:
   migration:
     build: .
-    image: gosac-migration
+    image: ghcr.io/moisesoliveira-dev/migration_temporary:latest
     container_name: gosac-migration
     ports:
       - "${PORT:-8080}:8080"
