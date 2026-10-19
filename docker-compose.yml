@@ -8,6 +8,9 @@ services:
     env_file:
       - .env
     environment:
+      CONTROL_PANEL: "true"
+      MIGRATE_ENABLED: "false"
+      MEDIA_MIGRATE_ENABLED: "true"
       PORT: "8080"
       CONTROL_SETTINGS_FILE: /data/.control-settings.json
       MIGRATION_STATE_FILE: /data/.migration-state.json
